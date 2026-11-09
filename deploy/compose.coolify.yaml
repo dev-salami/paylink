@@ -1,0 +1,50 @@
+# PayLink behind an existing Coolify (Traefik) proxy. Use this instead of the
+# root docker-compose.yml on hosts where Coolify owns ports 80 and 443.
+# Env lives outside git, e.g. /opt/paylink/secrets.env (mode 600).
+name: paylink
+services:
+  app:
+    build:
+      context: ..
+      dockerfile: apps/paylink-solana/Dockerfile
+    image: paylink-solana:${PAYLINK_REVISION:-latest}
+    env_file:
+      - path: ${PAYLINK_ENV_FILE:-/opt/paylink/secrets.env}
+    environment:
+      PORT: "3000"
+      HOSTNAME: 0.0.0.0
+    volumes:
+      - paylink-data:/app/apps/paylink-solana/data
+    expose:
+      - "3000"
+    restart: unless-stopped
+    logging: {driver: json-file, options: {max-size: "10m", max-file: "3"}}
+    healthcheck:
+      test: ["CMD", "node", "-e", "fetch('http://127.0.0.1:3000/api/health').then(r=>process.exit(r.ok?0:1)).catch(()=>process.exit(1))"]
+      interval: 30s
+      timeout: 5s
+      retries: 3
+      start_period: 20s
+    networks: [coolify]
+    labels:
+      traefik.enable: "true"
+      traefik.docker.network: coolify
+      traefik.http.middlewares.paylink-https.redirectscheme.scheme: https
+      traefik.http.routers.paylink-http.entrypoints: http
+      traefik.http.routers.paylink-http.middlewares: paylink-https
+      traefik.http.routers.paylink-http.rule: Host(`${PAYLINK_HOST:-paylink.181labs.build}`) || Host(`${PAYLINK_ALT_HOST:-paylink.144.91.121.163.sslip.io}`)
+      traefik.http.routers.paylink.entrypoints: https
+      traefik.http.routers.paylink.rule: Host(`${PAYLINK_HOST:-paylink.181labs.build}`) || Host(`${PAYLINK_ALT_HOST:-paylink.144.91.121.163.sslip.io}`)
+      traefik.http.routers.paylink.tls: "true"
+      traefik.http.routers.paylink.tls.certresolver: letsencrypt
+      traefik.http.middlewares.paylink-https.redirectscheme.permanent: "true"
+      traefik.http.services.paylink.loadbalancer.server.port: "3000"
+      traefik.http.routers.paylink-http.service: paylink
+      traefik.http.routers.paylink.service: paylink
+
+volumes:
+  paylink-data:
+
+networks:
+  coolify:
+    external: true
